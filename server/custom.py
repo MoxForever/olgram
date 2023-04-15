@@ -1,3 +1,5 @@
+import json
+
 import aiogram.utils.markdown
 from aiogram import Bot as AioBot, Dispatcher
 from aiogram.dispatcher.webhook import WebhookRequestHandler
@@ -80,15 +82,13 @@ async def send_user_message(message: types.Message, super_chat_id: int, bot, rep
             user_info += " | @" + message.from_user.username
         user_info += f" | #user{message.from_user.id}"
 
-        message_text = aiogram.utils.markdown.quote_html(message.text)
-
         # Добавлять информацию в конец текста
-        if message.content_type == types.ContentType.TEXT and len(message.text) + len(user_info) < 4093:  # noqa:E721
+        if message.content_type == types.ContentType.TEXT and not message.forward_date and len(message.text) + len(user_info) < 4093:  # noqa:E721
             new_message = await message.bot.send_message(
-                super_chat_id, message_text + "\n\n" + user_info, reply_to_message_id=reply_to_message_id, parse_mode="HTML")
+                super_chat_id, message.html_text + "\n\n" + user_info, reply_to_message_id=reply_to_message_id, parse_mode="HTML")
         else:  # Не добавлять информацию в конец текста, информация отдельным сообщением
-            new_message = await message.bot.send_message(super_chat_id, text=user_info, reply_to_message_id=reply_to_message_id)
-            new_message_2 = await message.copy_to(super_chat_id, reply_to_message_id=new_message.message_id)
+            new_message = await message.bot.send_message(super_chat_id, text=user_info, reply_to_message_id=reply_to_message_id, parse_mode="HTML")
+            new_message_2 = await message.forward(super_chat_id)
             await _redis.set(_message_unique_id(bot.pk, new_message_2.message_id), message.chat.id,
                              pexpire=ServerSettings.redis_timeout_ms())
         await _redis.set(_message_unique_id(bot.pk, new_message.message_id), message.chat.id,
@@ -227,18 +227,25 @@ async def message_handler(message: types.Message, *args, **kwargs):
             text += _(ServerSettings.append_text())
         return SendMessage(chat_id=message.chat.id, text=text, parse_mode="HTML")
 
-    if message.text and message.text == "/security_policy":
-        # На команду security_policy нужно ответить, не пересылая сообщение никуда
-        return _on_security_policy(message, bot)
+    if message.text and message.text == "/msg_info":
+        return SendMessage(chat_id=message.chat.id, text=json.dumps(json.loads(message.as_json()), indent=4))
+
+    if message.content_type in [aiogram.types.ContentType.VOICE, aiogram.types.ContentType.VIDEO_NOTE] and not message.forward_date:
+        return SendMessage(chat_id=message.chat.id, text="<b>❗️Вопросы принимаются в текстовом виде</b>", parse_mode="HTML")
 
     super_chat_id = await bot.super_chat_id()
 
+    if "is_edited" in kwargs:
+        new_kwargs = {"is_edited": True}
+    else:
+        new_kwargs = {}
+
     if message.chat.id != super_chat_id:
         # Это обычный чат
-        return await handle_user_message(message, super_chat_id, bot)
+        return await handle_user_message(message, super_chat_id, bot, **new_kwargs)
     else:
         # Это супер-чат
-        return await handle_operator_message(message, super_chat_id, bot)
+        return await handle_operator_message(message, super_chat_id, bot, **new_kwargs)
 
 
 async def edited_message_handler(message: types.Message, *args, **kwargs):
@@ -324,7 +331,8 @@ class CustomRequestHandler(WebhookRequestHandler):
                               types.ContentType.STICKER,
                               types.ContentType.VIDEO,
                               types.ContentType.VOICE,
-                              types.ContentType.LOCATION]
+                              types.ContentType.LOCATION,
+                              types.ContentType.VIDEO_NOTE]
         dp.register_message_handler(message_handler, content_types=supported_messages)
         dp.register_edited_message_handler(edited_message_handler, content_types=supported_messages)
 
