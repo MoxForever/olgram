@@ -1,3 +1,4 @@
+import aiogram.utils.markdown
 from aiogram import Bot as AioBot, Dispatcher
 from aiogram.dispatcher.webhook import WebhookRequestHandler
 from aiogram.dispatcher.webhook import SendMessage
@@ -70,20 +71,23 @@ def _on_security_policy(message: types.Message, bot):
                        parse_mode="HTML")
 
 
-async def send_user_message(message: types.Message, super_chat_id: int, bot):
+async def send_user_message(message: types.Message, super_chat_id: int, bot, reply_to_message_id=None):
     """Переслать сообщение от пользователя, добавлять к нему user info при необходимости"""
     if bot.enable_additional_info:
         user_info = _("Сообщение от пользователя ")
-        user_info += message.from_user.full_name
+        user_info += message.from_user.get_mention(as_html=True)
         if message.from_user.username:
             user_info += " | @" + message.from_user.username
-        user_info += f" | #ID{message.from_user.id}"
+        user_info += f" | #user{message.from_user.id}"
+
+        message_text = aiogram.utils.markdown.quote_html(message.text)
 
         # Добавлять информацию в конец текста
         if message.content_type == types.ContentType.TEXT and len(message.text) + len(user_info) < 4093:  # noqa:E721
-            new_message = await message.bot.send_message(super_chat_id, message.text + "\n\n" + user_info)
+            new_message = await message.bot.send_message(
+                super_chat_id, message_text + "\n\n" + user_info, reply_to_message_id=reply_to_message_id, parse_mode="HTML")
         else:  # Не добавлять информацию в конец текста, информация отдельным сообщением
-            new_message = await message.bot.send_message(super_chat_id, text=user_info)
+            new_message = await message.bot.send_message(super_chat_id, text=user_info, reply_to_message_id=reply_to_message_id)
             new_message_2 = await message.copy_to(super_chat_id, reply_to_message_id=new_message.message_id)
             await _redis.set(_message_unique_id(bot.pk, new_message_2.message_id), message.chat.id,
                              pexpire=ServerSettings.redis_timeout_ms())
@@ -107,7 +111,7 @@ async def send_to_superchat(is_super_group: bool, message: types.Message, super_
         if thread_first_message:
             # переслать в супер-чат, отвечая на предыдущее сообщение
             try:
-                new_message = await message.copy_to(super_chat_id, reply_to_message_id=int(thread_first_message))
+                new_message = await send_user_message(message, super_chat_id, bot, reply_to_message_id=int(thread_first_message))
                 await _redis.set(_message_unique_id(bot.pk, new_message.message_id), message.chat.id,
                                  pexpire=ServerSettings.redis_timeout_ms())
             except exceptions.BadRequest:

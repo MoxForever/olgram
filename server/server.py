@@ -1,4 +1,5 @@
 from aiogram import Bot as AioBot
+from aiogram.bot.api import TelegramAPIServer
 from aiogram.types import BotCommand
 from olgram.models.models import Bot
 from aiohttp import web
@@ -19,7 +20,7 @@ def path_for_bot(bot: Bot) -> str:
 
 
 def url_for_bot(bot: Bot) -> str:
-    return f"https://{ServerSettings.hook_host()}:{ServerSettings.hook_port()}" + path_for_bot(bot)
+    return f"http://{ServerSettings.hook_host()}:{ServerSettings.hook_port()}" + path_for_bot(bot)
 
 
 async def register_token(bot: Bot) -> bool:
@@ -30,7 +31,7 @@ async def register_token(bot: Bot) -> bool:
     """
     await unregister_token(bot.decrypted_token())
 
-    a_bot = AioBot(bot.decrypted_token())
+    a_bot = AioBot(bot.decrypted_token(), server=TelegramAPIServer.from_base("http://192.168.0.250:8800"))
     certificate = None
     if ServerSettings.use_custom_cert():
         certificate = open(ServerSettings.public_path(), 'rb')
@@ -53,7 +54,7 @@ async def unregister_token(token: str):
     :param token: токен
     :return:
     """
-    bot = AioBot(token)
+    bot = AioBot(token, server=TelegramAPIServer.from_base("http://192.168.0.250:8800"))
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.session.close()
     del bot

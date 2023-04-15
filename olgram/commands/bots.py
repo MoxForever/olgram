@@ -2,6 +2,7 @@
 Здесь работа с ботами на первом уровне вложенности: список ботов, добавление ботов
 """
 from aiogram import types, Bot as AioBot
+from aiogram.bot.api import TelegramAPIServer
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.exceptions import Unauthorized, TelegramAPIError
 from tortoise.exceptions import IntegrityError
@@ -94,14 +95,15 @@ async def bot_added(message: types.Message, state: FSMContext):
     token = token[0]
 
     try:
-        test_bot = AioBot(token)
+        test_bot = AioBot(token, server=TelegramAPIServer.from_base("http://192.168.0.250:8800"))
         test_bot_info = await test_bot.get_me()
         await test_bot.session.close()
     except ValueError:
         return await on_invalid_token()
     except Unauthorized:
         return await on_dummy_token()
-    except TelegramAPIError:
+    except TelegramAPIError as ex:
+        raise ex
         return await on_unknown_error()
 
     if token == BotSettings.token():

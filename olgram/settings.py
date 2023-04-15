@@ -92,7 +92,7 @@ class ServerSettings(AbstractSettings):
 
     @classmethod
     def append_text(cls) -> str:
-        return "\n\nЭтот бот создан с помощью @OlgramBot"
+        return "\n\nЭтот бот создан c помощью проекта @genshix"
 
     @classmethod
     @lru_cache

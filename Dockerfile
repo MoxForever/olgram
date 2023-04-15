@@ -13,7 +13,7 @@ RUN pip install "poetry==$POETRY_VERSION"
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock docker-entrypoint.sh ./
+COPY pyproject.toml poetry.lock ./
 RUN poetry install --no-interaction --no-ansi --no-dev
 
 COPY . /app
