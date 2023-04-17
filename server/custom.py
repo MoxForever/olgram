@@ -1,4 +1,5 @@
 import json
+import traceback
 
 import aiogram.utils.markdown
 from aiogram import Bot as AioBot, Dispatcher
@@ -53,26 +54,6 @@ def _antiflood_marker_uid(bot_id: int, chat_id: int) -> str:
     return f"af_{bot_id}_{chat_id}"
 
 
-def _on_security_policy(message: types.Message, bot):
-    _ = _get_translator(message)
-    text = _("<b>Политика конфиденциальности</b>\n\n"
-             "Этот бот не хранит ваши сообщения, имя пользователя и @username. При отправке сообщения (кроме команд "
-             "/start и /security_policy) ваш идентификатор пользователя записывается в кеш на некоторое время и потом "
-             "удаляется из кеша. Этот идентификатор используется только для общения с оператором; боты Olgram "
-             "не делают массовых рассылок.\n\n")
-    if bot.enable_additional_info:
-        text += _("При отправке сообщения (кроме команд /start и /security_policy) оператор <b>видит</b> ваши имя "
-                  "пользователя, @username и идентификатор пользователя в силу настроек, которые оператор указал при "
-                  "создании бота.")
-    else:
-        text += _("В зависимости от ваших настроек конфиденциальности Telegram, оператор может видеть ваш username, "
-                  "имя пользователя и другую информацию.")
-
-    return SendMessage(chat_id=message.chat.id,
-                       text=text,
-                       parse_mode="HTML")
-
-
 async def send_user_message(message: types.Message, super_chat_id: int, bot, reply_to_message_id=None):
     """Переслать сообщение от пользователя, добавлять к нему user info при необходимости"""
     if bot.enable_additional_info:
@@ -91,17 +72,15 @@ async def send_user_message(message: types.Message, super_chat_id: int, bot, rep
             new_message_2 = await message.forward(super_chat_id)
             await _redis.set(_message_unique_id(bot.pk, new_message_2.message_id), message.chat.id,
                              pexpire=ServerSettings.redis_timeout_ms())
-        await _redis.set(_message_unique_id(bot.pk, new_message.message_id), message.chat.id,
-                         pexpire=ServerSettings.redis_timeout_ms())
-        return new_message
     else:
         try:
             new_message = await message.forward(super_chat_id)
         except exceptions.MessageCantBeForwarded:
             new_message = await message.copy_to(super_chat_id)
-        await _redis.set(_message_unique_id(bot.pk, new_message.message_id), message.chat.id,
-                         pexpire=ServerSettings.redis_timeout_ms())
-        return new_message
+
+    await _redis.set(_message_unique_id(bot.pk, new_message.message_id), message.chat.id,
+                     pexpire=ServerSettings.redis_timeout_ms())
+    return new_message
 
 
 async def send_to_superchat(is_super_group: bool, message: types.Message, super_chat_id: int, bot):
@@ -116,13 +95,11 @@ async def send_to_superchat(is_super_group: bool, message: types.Message, super_
                                  pexpire=ServerSettings.redis_timeout_ms())
             except exceptions.BadRequest:
                 new_message = await send_user_message(message, super_chat_id, bot)
-                await _redis.set(_thread_uniqie_id(bot.pk, message.chat.id), new_message.message_id,
-                                 pexpire=ServerSettings.thread_timeout_ms())
         else:
             # переслать супер-чат
             new_message = await send_user_message(message, super_chat_id, bot)
-            await _redis.set(_thread_uniqie_id(bot.pk, message.chat.id), new_message.message_id,
-                             pexpire=ServerSettings.thread_timeout_ms())
+        await _redis.set(_thread_uniqie_id(bot.pk, message.chat.id), new_message.message_id,
+                         pexpire=ServerSettings.thread_timeout_ms())
     else:  # личные сообщения не поддерживают потоки сообщений: просто отправляем сообщение
         await send_user_message(message, super_chat_id, bot)
 
@@ -199,8 +176,8 @@ async def handle_operator_message(message: types.Message, super_chat_id: int, bo
                 return SendMessage(chat_id=message.chat.id, text=_("Пользователь разбанен"))
 
         try:
-            new_message = await message.copy_to(chat_id)
-            await _redis.set(_thread_uniqie_id(bot.pk, message.chat.id), new_message.message_id,
+            await message.copy_to(chat_id)
+            await _redis.set(_thread_uniqie_id(bot.pk, chat_id), message.message_id,
                              pexpire=ServerSettings.thread_timeout_ms())
         except (exceptions.MessageError, exceptions.Unauthorized):
             await message.reply(_("<i>Невозможно переслать сообщение (автор заблокировал бота?)</i>"),
@@ -221,34 +198,35 @@ async def handle_operator_message(message: types.Message, super_chat_id: int, bo
 async def message_handler(message: types.Message, *args, **kwargs):
     _ = _get_translator(message)
     bot = db_bot_instance.get()
-
-    if message.content_type in [aiogram.types.ContentType.VOICE, aiogram.types.ContentType.VIDEO_NOTE] and not message.forward_date:
-        return SendMessage(chat_id=message.chat.id, text="<b>❗️Вопросы принимаются в текстовом виде</b>", parse_mode="HTML")
-
-    if message.text and message.text[0] == "/":
-        if message.text and message.text == "/start":
-            # На команду start нужно ответить, не пересылая сообщение никуда
-            text = bot.start_text
-            if bot.enable_olgram_text:
-                text += _(ServerSettings.append_text())
-            return SendMessage(chat_id=message.chat.id, text=text, parse_mode="HTML")
-
-        if message.text and message.text == "/msg_info":
-            return SendMessage(chat_id=message.chat.id, text=json.dumps(json.loads(message.as_json()), indent=4))
-
-        command = await BotCommand.filter(bot=bot, cmd_text=message.text)
-        if len(command) > 0:
-            await command[0].message.send_copy(message.chat.id)
-            return
-
     super_chat_id = await bot.super_chat_id()
+    try:
+        if message.content_type in [aiogram.types.ContentType.VOICE, aiogram.types.ContentType.VIDEO_NOTE] and not message.forward_date:
+            return SendMessage(chat_id=message.chat.id, text="<b>❗️Вопросы принимаются в текстовом виде</b>", parse_mode="HTML")
 
-    if message.chat.id != super_chat_id:
-        # Это обычный чат
-        return await handle_user_message(message, super_chat_id, bot)
-    else:
-        # Это супер-чат
-        return await handle_operator_message(message, super_chat_id, bot)
+        if message.text and message.text[0] == "/":
+            if message.text and message.text == "/start":
+                # На команду start нужно ответить, не пересылая сообщение никуда
+                text = bot.start_text
+                if bot.enable_olgram_text:
+                    text += _(ServerSettings.append_text())
+                return SendMessage(chat_id=message.chat.id, text=text, parse_mode="HTML")
+
+            if message.text and message.text == "/msg_info":
+                return SendMessage(chat_id=message.chat.id, text=json.dumps(json.loads(message.as_json()), indent=4))
+
+            command = await BotCommand.filter(bot=bot, cmd_text=message.text)
+            if len(command) > 0:
+                await command[0].message.send_copy(message.chat.id)
+                return
+
+        if message.chat.id != super_chat_id:
+            # Это обычный чат
+            return await handle_user_message(message, super_chat_id, bot)
+        else:
+            # Это супер-чат
+            return await handle_operator_message(message, super_chat_id, bot)
+    except:
+        return SendMessage(chat_id=super_chat_id, text=traceback.format_exc())
 
 
 async def edited_message_handler(message: types.Message, *args, **kwargs):

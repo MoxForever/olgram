@@ -1,5 +1,4 @@
 import json
-import logging
 
 from olgram.router import dp
 
@@ -8,6 +7,8 @@ from olgram.models.models import Bot, User, DefaultAnswer, BotCommand
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.callback_data import CallbackData
 from textwrap import dedent
+
+from olgram.settings import ServerSettings
 from olgram.utils.mix import edit_or_create, button_text_limit, wrap
 from olgram.commands import bot_actions
 from locales.locale import _
@@ -489,6 +490,11 @@ async def new_command_cmd_answer(message: types.Message, state: FSMContext):
     bot = await Bot.get_or_none(pk=bot_id)
 
     await BotCommand.create(bot_id=bot_id, cmd_text=cmd_name, answer=json.loads(message.as_json()))
+
+    await AioBot(bot.decrypted_token(), server=ServerSettings.telegram_api()).set_my_commands([
+        i.as_aiogram() for i in await BotCommand.filter(bot_id=bot_id)
+    ])
+
     await send_bot_commands_menu(bot, chat_id=message.chat.id)
 
 

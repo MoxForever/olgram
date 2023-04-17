@@ -1,3 +1,4 @@
+import aiogram.types
 from aiogram.types import Message
 from tortoise.models import Model
 from tortoise import fields
@@ -127,3 +128,6 @@ class BotCommand(Model):
     @property
     def message(self):
         return Message.to_object(self.answer)
+
+    def as_aiogram(self):
+        return aiogram.types.BotCommand(self.cmd_text, self.message.text)
