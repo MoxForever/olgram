@@ -225,7 +225,7 @@ async def message_handler(message: types.Message, *args, **kwargs):
     if message.content_type in [aiogram.types.ContentType.VOICE, aiogram.types.ContentType.VIDEO_NOTE] and not message.forward_date:
         return SendMessage(chat_id=message.chat.id, text="<b>❗️Вопросы принимаются в текстовом виде</b>", parse_mode="HTML")
 
-    if message.text[0] == "/":
+    if message.text and message.text[0] == "/":
         if message.text and message.text == "/start":
             # На команду start нужно ответить, не пересылая сообщение никуда
             text = bot.start_text
