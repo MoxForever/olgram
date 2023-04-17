@@ -1,3 +1,4 @@
+from aiogram.types import Message
 from tortoise.models import Model
 from tortoise import fields
 from uuid import uuid4
@@ -115,3 +116,14 @@ class Promo(Model):
 
     owner = fields.ForeignKeyField("models.User", related_name="promo", on_delete=fields.relational.SET_NULL,
                                    null=True, default=None)
+
+
+class BotCommand(Model):
+    id = fields.BigIntField(pk=True)
+    bot = fields.ForeignKeyField("models.Bot", related_name="commands", on_delete=fields.relational.CASCADE)
+    cmd_text = fields.CharField(max_length=32, null=False)
+    answer = fields.JSONField(null=False)
+
+    @property
+    def message(self):
+        return Message.to_object(self.answer)

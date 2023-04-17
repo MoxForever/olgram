@@ -14,7 +14,7 @@ from tortoise.expressions import F
 import logging
 import typing as ty
 from olgram.settings import ServerSettings
-from olgram.models.models import Bot, GroupChat, BannedUser
+from olgram.models.models import Bot, GroupChat, BannedUser, BotCommand
 from locales.locale import _, translators
 from server.inlines import inline_handler
 
@@ -199,7 +199,9 @@ async def handle_operator_message(message: types.Message, super_chat_id: int, bo
                 return SendMessage(chat_id=message.chat.id, text=_("Пользователь разбанен"))
 
         try:
-            await message.copy_to(chat_id)
+            new_message = await message.copy_to(chat_id)
+            await _redis.set(_thread_uniqie_id(bot.pk, message.chat.id), new_message.message_id,
+                             pexpire=ServerSettings.thread_timeout_ms())
         except (exceptions.MessageError, exceptions.Unauthorized):
             await message.reply(_("<i>Невозможно переслать сообщение (автор заблокировал бота?)</i>"),
                                 parse_mode="HTML")
@@ -220,32 +222,33 @@ async def message_handler(message: types.Message, *args, **kwargs):
     _ = _get_translator(message)
     bot = db_bot_instance.get()
 
-    if message.text and message.text == "/start":
-        # На команду start нужно ответить, не пересылая сообщение никуда
-        text = bot.start_text
-        if bot.enable_olgram_text:
-            text += _(ServerSettings.append_text())
-        return SendMessage(chat_id=message.chat.id, text=text, parse_mode="HTML")
-
-    if message.text and message.text == "/msg_info":
-        return SendMessage(chat_id=message.chat.id, text=json.dumps(json.loads(message.as_json()), indent=4))
-
     if message.content_type in [aiogram.types.ContentType.VOICE, aiogram.types.ContentType.VIDEO_NOTE] and not message.forward_date:
         return SendMessage(chat_id=message.chat.id, text="<b>❗️Вопросы принимаются в текстовом виде</b>", parse_mode="HTML")
 
-    super_chat_id = await bot.super_chat_id()
+    if message.text[0] == "/":
+        if message.text and message.text == "/start":
+            # На команду start нужно ответить, не пересылая сообщение никуда
+            text = bot.start_text
+            if bot.enable_olgram_text:
+                text += _(ServerSettings.append_text())
+            return SendMessage(chat_id=message.chat.id, text=text, parse_mode="HTML")
 
-    if "is_edited" in kwargs:
-        new_kwargs = {"is_edited": True}
-    else:
-        new_kwargs = {}
+        if message.text and message.text == "/msg_info":
+            return SendMessage(chat_id=message.chat.id, text=json.dumps(json.loads(message.as_json()), indent=4))
+
+        command = await BotCommand.filter(bot=bot, cmd_text=message.text)
+        if len(command) > 0:
+            await command[0].message.send_copy(message.chat.id)
+            return
+
+    super_chat_id = await bot.super_chat_id()
 
     if message.chat.id != super_chat_id:
         # Это обычный чат
-        return await handle_user_message(message, super_chat_id, bot, **new_kwargs)
+        return await handle_user_message(message, super_chat_id, bot)
     else:
         # Это супер-чат
-        return await handle_operator_message(message, super_chat_id, bot, **new_kwargs)
+        return await handle_operator_message(message, super_chat_id, bot)
 
 
 async def edited_message_handler(message: types.Message, *args, **kwargs):
@@ -320,7 +323,7 @@ class CustomRequestHandler(WebhookRequestHandler):
         if not bot:
             return None
         db_bot_instance.set(bot)
-        dp = Dispatcher(AioBot(bot.decrypted_token()))
+        dp = Dispatcher(AioBot(bot.decrypted_token(), server=ServerSettings.telegram_api()))
 
         supported_messages = [types.ContentType.TEXT,
                               types.ContentType.CONTACT,

@@ -1,3 +1,4 @@
+from aiogram.bot.api import TelegramAPIServer
 from dotenv import load_dotenv
 from abc import ABC
 import os
@@ -103,6 +104,10 @@ class ServerSettings(AbstractSettings):
     @lru_cache
     def thread_timeout_ms(cls) -> int:
         return None
+
+    @classmethod
+    def telegram_api(cls) -> TelegramAPIServer:
+        return TelegramAPIServer.from_base("http://192.168.0.250:8800")
 
 
 logging.basicConfig(level=os.environ.get("LOGLEVEL") or "WARNING",

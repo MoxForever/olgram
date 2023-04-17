@@ -2,7 +2,6 @@
 Здесь работа с ботами на первом уровне вложенности: список ботов, добавление ботов
 """
 from aiogram import types, Bot as AioBot
-from aiogram.bot.api import TelegramAPIServer
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.exceptions import Unauthorized, TelegramAPIError
 from tortoise.exceptions import IntegrityError
@@ -10,7 +9,7 @@ import re
 from textwrap import dedent
 
 from olgram.models.models import Bot, User
-from olgram.settings import OlgramSettings, BotSettings
+from olgram.settings import OlgramSettings, BotSettings, ServerSettings
 from olgram.commands.menu import send_bots_menu
 from server.server import register_token
 from locales.locale import _
@@ -95,7 +94,7 @@ async def bot_added(message: types.Message, state: FSMContext):
     token = token[0]
 
     try:
-        test_bot = AioBot(token, server=TelegramAPIServer.from_base("http://192.168.0.250:8800"))
+        test_bot = AioBot(token, server=ServerSettings.telegram_api())
         test_bot_info = await test_bot.get_me()
         await test_bot.session.close()
     except ValueError:

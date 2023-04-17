@@ -31,7 +31,7 @@ async def register_token(bot: Bot) -> bool:
     """
     await unregister_token(bot.decrypted_token())
 
-    a_bot = AioBot(bot.decrypted_token(), server=TelegramAPIServer.from_base("http://192.168.0.250:8800"))
+    a_bot = AioBot(bot.decrypted_token(), server=ServerSettings.telegram_api())
     certificate = None
     if ServerSettings.use_custom_cert():
         certificate = open(ServerSettings.public_path(), 'rb')
@@ -39,8 +39,7 @@ async def register_token(bot: Bot) -> bool:
     res = await a_bot.set_webhook(url_for_bot(bot), certificate=certificate, drop_pending_updates=True,
                                   max_connections=10)
     await a_bot.set_my_commands([
-        BotCommand("/start", _("(Пере)запустить бота")),
-        BotCommand("/security_policy", _("Политика конфиденциальности"))
+        BotCommand("/start", _("(Пере)запустить бота"))
     ])
 
     await a_bot.session.close()
@@ -54,7 +53,7 @@ async def unregister_token(token: str):
     :param token: токен
     :return:
     """
-    bot = AioBot(token, server=TelegramAPIServer.from_base("http://192.168.0.250:8800"))
+    bot = AioBot(token, server=ServerSettings.telegram_api())
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.session.close()
     del bot

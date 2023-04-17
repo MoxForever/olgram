@@ -1,7 +1,10 @@
+import json
+import logging
+
 from olgram.router import dp
 
 from aiogram import types, Bot as AioBot
-from olgram.models.models import Bot, User, DefaultAnswer
+from olgram.models.models import Bot, User, DefaultAnswer, BotCommand
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.callback_data import CallbackData
 from textwrap import dedent
@@ -109,6 +112,11 @@ async def send_bot_menu(bot: Bot, call: types.CallbackQuery):
                                                                    chat=empty))
     )
     keyboard.insert(
+        types.InlineKeyboardButton(text=_("Команды"),
+                                   callback_data=menu_callback.new(level=2, bot_id=bot.id, operation="commands",
+                                                                   chat=empty))
+    )
+    keyboard.insert(
         types.InlineKeyboardButton(text=_("Удалить бот"),
                                    callback_data=menu_callback.new(level=2, bot_id=bot.id, operation="delete",
                                                                    chat=empty))
@@ -200,6 +208,39 @@ async def send_bot_settings_menu(bot: Bot, call: types.CallbackQuery):
         text += _("Olgram подпись: <b>{0}</b>").format(olgram_turn)
 
     await edit_or_create(call, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def send_bot_commands_menu(bot: Bot, call: ty.Optional[types.CallbackQuery] = None, chat_id: ty.Optional[int] = None):
+    if call:
+        await call.answer()
+
+    commands = await BotCommand.filter(bot=bot)
+
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    for i in commands:
+        keyboard.insert(
+            types.InlineKeyboardButton(text="Удалить " + i.cmd_text,
+                                       callback_data=menu_callback.new(level=3, bot_id=bot.id,
+                                                                       operation=f"delete_{i.id}", chat=empty))
+        )
+    keyboard.insert(
+        types.InlineKeyboardButton(text=_("Новая команда"),
+                                   callback_data=menu_callback.new(level=3, bot_id=bot.id, operation="new_command",
+                                                                   chat=empty))
+    )
+    keyboard.insert(
+        types.InlineKeyboardButton(text=_("<< Назад"),
+                                   callback_data=menu_callback.new(level=1, bot_id=bot.id, operation=empty, chat=empty))
+    )
+
+    text = dedent(_("""
+        Нажмите на команду, чтобы отредактировать ее, или используйте кнопку "Новая команда" для создания новой
+        """))
+    text = text.format(bot.name, bot.start_text)
+    if call:
+        await edit_or_create(call, text, keyboard, parse_mode="HTML")
+    else:
+        await AioBot.get_current().send_message(chat_id, text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def send_bot_text_menu(bot: Bot, call: ty.Optional[types.CallbackQuery] = None, chat_id: ty.Optional[int] = None):
@@ -342,6 +383,38 @@ async def send_bot_templates_menu(bot: Bot, call: ty.Optional[types.CallbackQuer
         await AioBot.get_current().send_message(chat_id, text, reply_markup=keyboard, parse_mode="HTML")
 
 
+async def new_command_setup(bot: Bot, call: ty.Optional[types.CallbackQuery] = None,
+                            chat_id: ty.Optional[int] = None):
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    keyboard.insert(
+        types.InlineKeyboardButton(text=_("<< Назад"),
+                                   callback_data=menu_callback.new(level=1, bot_id=bot.id, operation=empty, chat=empty))
+    )
+
+    text = "Напишите команду в виде /example"
+
+    if call:
+        await edit_or_create(call, text, keyboard)
+    else:
+        await AioBot.get_current().send_message(chat_id, text, reply_markup=keyboard)
+
+
+async def new_command_set_msg(bot: Bot, call: ty.Optional[types.CallbackQuery] = None,
+                              chat_id: ty.Optional[int] = None):
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    keyboard.insert(
+        types.InlineKeyboardButton(text=_("<< Назад"),
+                                   callback_data=menu_callback.new(level=1, bot_id=bot.id, operation=empty, chat=empty))
+    )
+
+    text = "Напишите ответ для этой команды"
+
+    if call:
+        await edit_or_create(call, text, keyboard)
+    else:
+        await AioBot.get_current().send_message(chat_id, text, reply_markup=keyboard)
+
+
 @dp.message_handler(state="wait_start_text", content_types="text", regexp="^[^/].+")  # Not command
 async def start_text_received(message: types.Message, state: FSMContext):
     async with state.proxy() as proxy:
@@ -395,6 +468,30 @@ async def template_received(message: types.Message, state: FSMContext):
     await send_bot_templates_menu(bot, chat_id=message.chat.id)
 
 
+@dp.message_handler(state="wait_new_command_cmd_text", content_types="text", regexp="/[a-zA-Z_]+")  # Not command
+async def new_command_cmd_text(message: types.Message, state: FSMContext):
+    async with state.proxy() as proxy:
+        bot_id = proxy.get("bot_id")
+        proxy["cmd_name"] = message.text
+
+    bot = await Bot.get_or_none(pk=bot_id)
+
+    await state.set_state("wait_new_command_cmd_msg")
+    await new_command_set_msg(bot, chat_id=message.chat.id)
+
+
+@dp.message_handler(state="wait_new_command_cmd_msg", content_types=types.ContentType.all())
+async def new_command_cmd_answer(message: types.Message, state: FSMContext):
+    async with state.proxy() as proxy:
+        bot_id = proxy.get("bot_id")
+        cmd_name = proxy["cmd_name"]
+
+    bot = await Bot.get_or_none(pk=bot_id)
+
+    await BotCommand.create(bot_id=bot_id, cmd_text=cmd_name, answer=json.loads(message.as_json()))
+    await send_bot_commands_menu(bot, chat_id=message.chat.id)
+
+
 @dp.callback_query_handler(menu_callback.filter(), state="*")
 async def callback(call: types.CallbackQuery, callback_data: dict, state: FSMContext):
     level = callback_data.get("level")
@@ -428,6 +525,8 @@ async def callback(call: types.CallbackQuery, callback_data: dict, state: FSMCon
             async with state.proxy() as proxy:
                 proxy["bot_id"] = bot.id
             return await send_bot_text_menu(bot, call)
+        if operation == "commands":
+            return await send_bot_commands_menu(bot, call)
 
     if level == "3":
         if operation == "delete_yes":
@@ -462,3 +561,12 @@ async def callback(call: types.CallbackQuery, callback_data: dict, state: FSMCon
             async with state.proxy() as proxy:
                 proxy["bot_id"] = bot.id
             return await send_bot_templates_menu(bot, call)
+        if operation == "new_command":
+            await state.set_state("wait_new_command_cmd_text")
+            async with state.proxy() as proxy:
+                proxy["bot_id"] = bot.id
+            await new_command_setup(bot, call)
+        if operation.startswith("delete"):
+            bot_command_id = int(operation.split("_", 1)[1])
+            await (await BotCommand.filter(id=bot_command_id))[0].delete()
+            return await send_bot_commands_menu(bot, call)
