@@ -491,9 +491,9 @@ async def new_command_cmd_answer(message: types.Message, state: FSMContext):
 
     await BotCommand.create(bot_id=bot_id, cmd_text=cmd_name, answer=json.loads(message.as_json()))
 
-    await AioBot(bot.decrypted_token(), server=ServerSettings.telegram_api()).set_my_commands([
-        i.as_aiogram() for i in await BotCommand.filter(bot_id=bot_id)
-    ])
+    # await AioBot(bot.decrypted_token(), server=ServerSettings.telegram_api()).set_my_commands([
+    #     i.as_aiogram() for i in await BotCommand.filter(bot_id=bot_id)
+    # ])
 
     await send_bot_commands_menu(bot, chat_id=message.chat.id)
 
